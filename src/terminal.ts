@@ -132,7 +132,7 @@ export function detectAgent(
 
 function isSelfTerminal(raw: RawTabData): boolean {
   const haystack = `${raw.windowName} ${raw.customTitle} ${raw.processes.join(" ")}`;
-  if (/disruptionWatcher|disruption-watcher/i.test(haystack)) {
+  if (/disruptionWatcher|disruption-watcher|\bsentinel\b/i.test(haystack)) {
     return true;
   }
   if (process.env.SSH_TTY && raw.tty === process.env.SSH_TTY) {

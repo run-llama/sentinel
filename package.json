@@ -1,7 +1,12 @@
 {
-  "name": "disruption-watcher",
+  "name": "sentinel",
   "version": "0.1.0",
-  "description": "Monitor AI coding agents running in macOS Terminal windows and grade their work with Gemini Hydrogen",
+  "description": "Real-time AI coding agent supervisor for macOS terminals — monitors live terminal output and git diffs, grades progress with Gemini 4 Hydrogen, and flags loops, mistakes, and off-track edits.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/run-llama/sentinel.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
