@@ -1,5 +1,15 @@
-import { getDefaultModel } from "./analyzer.js";
-import type { Severity, Verdict, WatcherStateSnapshot } from "./types.js";
+import {
+  getDefaultModel,
+  getDefaultOllamaUrl,
+  getDefaultProvider,
+  MODEL_PRESETS,
+} from "./analyzer.js";
+import type {
+  AuditorProvider,
+  Severity,
+  Verdict,
+  WatcherStateSnapshot,
+} from "./types.js";
 import { DisruptionWatcher } from "./watcher.js";
 
 const ANSI = {
@@ -42,7 +52,9 @@ function parseArgs(argv: string[]) {
   let json = false;
   let notify = false;
   let intervalSec = 30;
+  let provider: AuditorProvider = getDefaultProvider();
   let model = getDefaultModel();
+  let ollamaBaseUrl = getDefaultOllamaUrl();
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -51,29 +63,45 @@ function parseArgs(argv: string[]) {
     else if (arg === "--json") json = true;
     else if (arg === "--notify") notify = true;
     else if (arg === "--interval" && argv[i + 1]) {
-      intervalSec = Math.max(5, Number(argv[++i]) || 15);
+      intervalSec = Math.max(5, Number(argv[++i]) || 30);
+    } else if (arg === "--provider" && argv[i + 1]) {
+      const p = argv[++i].toLowerCase();
+      if (p === "auto" || p === "google" || p === "openrouter" || p === "ollama") {
+        provider = p;
+      }
     } else if (arg === "--model" && argv[i + 1]) {
       model = argv[++i];
+    } else if (arg === "--ollama-url" && argv[i + 1]) {
+      ollamaBaseUrl = argv[++i];
     } else if (arg === "--help" || arg === "-h") {
-      console.log(`DisruptionWatcher CLI
+      const presetLines = MODEL_PRESETS.map(
+        (p) => `    ${p.alias.padEnd(10)} -> ${p.id} (${p.label})`
+      ).join("\n");
+      console.log(`Sentinel CLI
 
 Usage:
   npm run cli -- [options]
   npm run scan
 
 Options:
-  --once            Run a single scan and exit
-  --all             Include non-agent shell terminals
-  --interval <sec>  Poll interval in seconds (default: 15)
-  --notify          Send macOS notifications on warning/critical verdicts
-  --model <name>    Gemini model name (default: ${getDefaultModel()})
-  --json            Output raw JSON (best with --once)
+  --once               Run a single scan and exit
+  --all                Include non-agent shell terminals
+  --interval <sec>     Poll interval in seconds (default: 30)
+  --notify             Send macOS notifications on warning/critical verdicts
+  --provider <name>    auto | google | openrouter | ollama (default: ${getDefaultProvider()})
+  --model <id|alias>   Auditor model ID or alias (default: ${getDefaultModel()})
+  --ollama-url <url>   Ollama base URL (default: ${getDefaultOllamaUrl()})
+  --json               Output raw JSON (best with --once)
+
+Built-in model aliases:
+${presetLines}
+  Any OpenRouter model ID (e.g. qwen/qwen3-coder) or Ollama model (e.g. --provider ollama --model llama3.2) works too.
 `);
       process.exit(0);
     }
   }
 
-  return { once, all, json, notify, intervalSec, model };
+  return { once, all, json, notify, intervalSec, provider, model, ollamaBaseUrl };
 }
 
 function renderSnapshot(state: WatcherStateSnapshot, clearScreen: boolean): void {
@@ -175,7 +203,9 @@ async function main(): Promise<void> {
     includeAllTerminals: opts.all,
     notifyOnBadVerdict: opts.notify,
     pollIntervalMs: opts.intervalSec * 1000,
+    provider: opts.provider,
     model: opts.model,
+    ollamaBaseUrl: opts.ollamaBaseUrl,
   });
 
   if (opts.once) {

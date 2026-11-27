@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
-import { analyzeTerminalWithGemini, getDefaultModel } from "./analyzer.js";
+import {
+  analyzeTerminal,
+  getDefaultModel,
+  getDefaultOllamaUrl,
+  getDefaultProvider,
+  resolveModelAlias,
+} from "./analyzer.js";
 import { captureGitWorkspace } from "./git.js";
 import { captureTerminalTabs, sendMacNotification } from "./terminal.js";
 import type {
@@ -18,7 +24,9 @@ const DEFAULT_CONFIG: WatcherConfig = {
   stallRecheckMs: 120_000,
   includeAllTerminals: false,
   notifyOnBadVerdict: true,
+  provider: getDefaultProvider(),
   model: getDefaultModel(),
+  ollamaBaseUrl: getDefaultOllamaUrl(),
   maxFramesPerTab: 6,
 };
 
@@ -60,7 +68,11 @@ export class DisruptionWatcher extends EventEmitter {
   public updateConfig(patch: Partial<WatcherConfig>): WatcherConfig {
     const prevInterval = this.config.pollIntervalMs;
     const prevLive = this.config.liveWatch;
-    this.config = { ...this.config, ...patch };
+    const normalizedPatch: Partial<WatcherConfig> = { ...patch };
+    if (typeof normalizedPatch.model === "string") {
+      normalizedPatch.model = resolveModelAlias(normalizedPatch.model);
+    }
+    this.config = { ...this.config, ...normalizedPatch };
 
     if (!this.config.liveWatch) {
       this.stopTimer();
@@ -270,7 +282,11 @@ export class DisruptionWatcher extends EventEmitter {
     const latestHash = this.combinedHash(term);
 
     try {
-      const result = await analyzeTerminalWithGemini(term, this.config.model);
+      const result = await analyzeTerminal(term, {
+        provider: this.config.provider,
+        model: this.config.model,
+        ollamaBaseUrl: this.config.ollamaBaseUrl,
+      });
       term.analysis = result;
       term.lastError = null;
       this.lastAnalyzedHash.set(term.id, latestHash);

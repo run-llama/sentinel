@@ -327,6 +327,38 @@
       color: var(--muted);
       margin-top: 3px;
     }
+    .model-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+    .model-bar label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .model-bar select,
+    .model-bar input[type="text"] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .model-bar input[type="text"] {
+      min-width: 240px;
+      flex: 1;
+      max-width: 360px;
+    }
     .empty {
       text-align: center;
       padding: 48px 20px;
@@ -379,6 +411,26 @@
   </header>
 
   <main>
+    <section class="model-bar">
+      <label for="selectProvider">Auditor</label>
+      <select id="selectProvider" aria-label="Auditor provider">
+        <option value="auto">Auto</option>
+        <option value="google">Google Gemini</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="ollama">Ollama (Local)</option>
+      </select>
+      <select id="selectPreset" aria-label="Model preset">
+        <option value="">Choose preset…</option>
+      </select>
+      <input
+        id="inputModel"
+        type="text"
+        placeholder="Any OpenRouter ID (e.g. anthropic/claude-haiku-5.5) or Ollama model"
+      />
+      <button id="btnApplyModel" class="btn-sm primary">Apply Model</button>
+      <button id="btnRefreshModels" class="btn-sm" title="Refresh local Ollama models">Refresh Ollama</button>
+    </section>
+
     <section class="stats">
       <div class="stat">
         <div class="stat-label">Monitored</div>
@@ -397,7 +449,7 @@
         <div id="statCrit" class="stat-val" style="color: var(--critical)">0</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Hydrogen Cost</div>
+        <div class="stat-label">Auditor Cost</div>
         <div id="statCost" class="stat-val" style="color: var(--accent)">$0.0000</div>
         <div id="statCostSub" class="stat-sub">0 calls · 0 tokens</div>
       </div>
@@ -417,8 +469,35 @@
     const toggleNotifyEl = document.getElementById("toggleNotify");
     const btnScanEl = document.getElementById("btnScan");
     const btnForceEl = document.getElementById("btnForce");
+    const selectProviderEl = document.getElementById("selectProvider");
+    const selectPresetEl = document.getElementById("selectPreset");
+    const inputModelEl = document.getElementById("inputModel");
+    const btnApplyModelEl = document.getElementById("btnApplyModel");
+    const btnRefreshModelsEl = document.getElementById("btnRefreshModels");
 
     let latestState = null;
+    let modelCatalog = { presets: [], ollamaModels: [] };
+
+    async function loadModelCatalog() {
+      try {
+        const resp = await fetch("/api/models");
+        if (!resp.ok) return;
+        modelCatalog = await resp.json();
+        const presetOptions = (modelCatalog.presets || [])
+          .map((p) => `<option value="${esc(p.id)}" data-provider="${esc(p.provider)}">${esc(p.label)}</option>`)
+          .join("");
+        const ollamaOptions = (modelCatalog.ollamaModels || []).length
+          ? `<optgroup label="Local Ollama (${esc(modelCatalog.ollamaBaseUrl)})">${modelCatalog.ollamaModels
+              .map((m) => `<option value="${esc(m)}" data-provider="ollama">${esc(m)} (Local $0)</option>`)
+              .join("")}</optgroup>`
+          : `<optgroup label="Local Ollama (not running / no models)"></optgroup>`;
+        selectPresetEl.innerHTML =
+          `<option value="">Select preset…</option>` +
+          `<optgroup label="Cloud Presets">${presetOptions}</optgroup>` +
+          ollamaOptions;
+      } catch {}
+    }
+    loadModelCatalog();
 
     function fmtUsd(v) {
       const n = Number(v) || 0;
@@ -488,6 +567,28 @@
     };
     toggleAllEl.onchange = () => patchConfig({ includeAllTerminals: toggleAllEl.checked });
     toggleNotifyEl.onchange = () => patchConfig({ notifyOnBadVerdict: toggleNotifyEl.checked });
+    selectPresetEl.onchange = () => {
+      const opt = selectPresetEl.selectedOptions[0];
+      const modelId = selectPresetEl.value;
+      if (!modelId) return;
+      const prov = opt?.dataset?.provider || "auto";
+      selectProviderEl.value = prov;
+      inputModelEl.value = modelId;
+      patchConfig({ provider: prov, model: modelId });
+      selectPresetEl.value = "";
+    };
+    selectProviderEl.onchange = () => {
+      patchConfig({ provider: selectProviderEl.value });
+    };
+    btnApplyModelEl.onclick = () => {
+      const model = inputModelEl.value.trim();
+      if (!model) return;
+      patchConfig({ provider: selectProviderEl.value, model });
+    };
+    inputModelEl.onkeydown = (e) => {
+      if (e.key === "Enter") btnApplyModelEl.click();
+    };
+    btnRefreshModelsEl.onclick = () => loadModelCatalog();
 
     function updateHeaderMeta() {
       if (!latestState) return;
@@ -531,6 +632,12 @@
       }
       toggleAllEl.checked = Boolean(state.config.includeAllTerminals);
       toggleNotifyEl.checked = Boolean(state.config.notifyOnBadVerdict);
+      if (document.activeElement !== selectProviderEl) {
+        selectProviderEl.value = state.config.provider || "auto";
+      }
+      if (document.activeElement !== inputModelEl) {
+        inputModelEl.value = state.config.model || "";
+      }
 
       const cost = state.cost || { totalCostUsd: 0, totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
       document.getElementById("statCost").textContent = fmtUsd(cost.totalCostUsd);

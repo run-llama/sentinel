@@ -2,9 +2,21 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDefaultModel } from "./analyzer.js";
+import {
+  getDefaultModel,
+  getDefaultOllamaUrl,
+  getDefaultProvider,
+  getGeminiApiKey,
+  getOpenRouterApiKey,
+  listOllamaModels,
+  MODEL_PRESETS,
+} from "./analyzer.js";
 import { focusTerminalTab } from "./terminal.js";
-import type { WatcherConfig, WatcherStateSnapshot } from "./types.js";
+import type {
+  AuditorProvider,
+  WatcherConfig,
+  WatcherStateSnapshot,
+} from "./types.js";
 import { DisruptionWatcher } from "./watcher.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -16,7 +28,9 @@ const watcher = new DisruptionWatcher({
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   includeAllTerminals: process.env.INCLUDE_ALL === "1",
   notifyOnBadVerdict: process.env.NOTIFY !== "0",
+  provider: getDefaultProvider(),
   model: getDefaultModel(),
+  ollamaBaseUrl: getDefaultOllamaUrl(),
 });
 
 const sseClients = new Set<ServerResponse>();
@@ -70,6 +84,19 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (method === "GET" && url.pathname === "/api/models") {
+      const cfg = watcher.getConfig();
+      const ollamaModels = await listOllamaModels(cfg.ollamaBaseUrl);
+      sendJson(res, 200, {
+        presets: MODEL_PRESETS,
+        ollamaModels,
+        ollamaBaseUrl: cfg.ollamaBaseUrl,
+        hasGoogleKey: Boolean(getGeminiApiKey()),
+        hasOpenRouterKey: Boolean(getOpenRouterApiKey()),
+      });
+      return;
+    }
+
     if (method === "GET" && url.pathname === "/api/events") {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -105,6 +132,18 @@ const server = createServer(async (req, res) => {
       }
       if (typeof body.pollIntervalMs === "number" && body.pollIntervalMs >= 5000) {
         patch.pollIntervalMs = Math.round(body.pollIntervalMs);
+      }
+      if (
+        typeof body.provider === "string" &&
+        ["auto", "google", "openrouter", "ollama"].includes(body.provider)
+      ) {
+        patch.provider = body.provider as AuditorProvider;
+      }
+      if (typeof body.model === "string" && body.model.trim()) {
+        patch.model = body.model.trim();
+      }
+      if (typeof body.ollamaBaseUrl === "string" && body.ollamaBaseUrl.trim()) {
+        patch.ollamaBaseUrl = body.ollamaBaseUrl.trim().replace(/\/+$/, "");
       }
       const updated = watcher.updateConfig(patch);
       if (typeof body.includeAllTerminals === "boolean") {

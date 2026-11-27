@@ -136,6 +136,17 @@ export interface MonitoredTerminal {
   history: VerdictHistoryEntry[];
 }
 
+export type AuditorProvider = "auto" | "google" | "openrouter" | "ollama";
+
+export interface ModelPreset {
+  alias: string;
+  id: string;
+  label: string;
+  provider: AuditorProvider;
+  promptRatePerMillion: number;
+  completionRatePerMillion: number;
+}
+
 export interface WatcherConfig {
   liveWatch: boolean;
   pollIntervalMs: number;
@@ -143,7 +154,9 @@ export interface WatcherConfig {
   stallRecheckMs: number;
   includeAllTerminals: boolean;
   notifyOnBadVerdict: boolean;
+  provider: AuditorProvider;
   model: string;
+  ollamaBaseUrl: string;
   maxFramesPerTab: number;
 }
 
