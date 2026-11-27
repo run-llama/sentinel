@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/sentinel-banner.jpg" alt="Sentinel — AI Agent Terminal Supervisor" width="100%" />
+</p>
+
 # Sentinel
 
 **Real-time supervisor for AI coding agents running in your terminals.**
