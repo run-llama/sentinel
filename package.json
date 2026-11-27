@@ -1,0 +1,19 @@
+{
+  "name": "disruption-watcher",
+  "version": "0.1.0",
+  "description": "Monitor AI coding agents running in macOS Terminal windows and grade their work with Gemini Hydrogen",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "start": "tsx src/server.ts",
+    "cli": "tsx src/cli.ts",
+    "scan": "tsx src/cli.ts --once",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
