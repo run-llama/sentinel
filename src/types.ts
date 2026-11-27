@@ -65,6 +65,23 @@ export interface ContentFrame {
   contents: string;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+export interface CostSummary {
+  totalCostUsd: number;
+  lastCallCostUsd: number;
+  totalPromptTokens: number;
+  totalCachedTokens: number;
+  totalCompletionTokens: number;
+  totalCalls: number;
+}
+
 export interface AnalysisResult {
   verdict: Verdict;
   severity: Severity;
@@ -80,6 +97,7 @@ export interface AnalysisResult {
   model: string;
   analyzedAt: string;
   latencyMs: number;
+  usage: TokenUsage;
 }
 
 export interface VerdictHistoryEntry {
@@ -119,6 +137,7 @@ export interface MonitoredTerminal {
 }
 
 export interface WatcherConfig {
+  liveWatch: boolean;
   pollIntervalMs: number;
   /** Re-analyze even if screen is unchanged after this many ms while busy */
   stallRecheckMs: number;
@@ -131,8 +150,10 @@ export interface WatcherConfig {
 export interface WatcherStateSnapshot {
   startedAt: string;
   lastPollAt: string | null;
+  nextPollAt: string | null;
   pollCount: number;
   isScanning: boolean;
+  cost: CostSummary;
   config: WatcherConfig;
   terminals: MonitoredTerminal[];
 }

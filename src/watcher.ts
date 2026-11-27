@@ -3,6 +3,7 @@ import { analyzeTerminalWithGemini, getDefaultModel } from "./analyzer.js";
 import { captureGitWorkspace } from "./git.js";
 import { captureTerminalTabs, sendMacNotification } from "./terminal.js";
 import type {
+  CostSummary,
   GitWorkspaceSnapshot,
   MonitoredTerminal,
   Severity,
@@ -12,7 +13,8 @@ import type {
 } from "./types.js";
 
 const DEFAULT_CONFIG: WatcherConfig = {
-  pollIntervalMs: 15_000,
+  liveWatch: true,
+  pollIntervalMs: 30_000,
   stallRecheckMs: 120_000,
   includeAllTerminals: false,
   notifyOnBadVerdict: true,
@@ -33,9 +35,18 @@ export class DisruptionWatcher extends EventEmitter {
   private lastAnalyzedHash = new Map<string, string>();
   private startedAt = new Date().toISOString();
   private lastPollAt: string | null = null;
+  private nextPollAt: string | null = null;
   private pollCount = 0;
   private isScanning = false;
   private timer: NodeJS.Timeout | null = null;
+  private cost: CostSummary = {
+    totalCostUsd: 0,
+    lastCallCostUsd: 0,
+    totalPromptTokens: 0,
+    totalCachedTokens: 0,
+    totalCompletionTokens: 0,
+    totalCalls: 0,
+  };
 
   constructor(partialConfig: Partial<WatcherConfig> = {}) {
     super();
@@ -48,11 +59,15 @@ export class DisruptionWatcher extends EventEmitter {
 
   public updateConfig(patch: Partial<WatcherConfig>): WatcherConfig {
     const prevInterval = this.config.pollIntervalMs;
+    const prevLive = this.config.liveWatch;
     this.config = { ...this.config, ...patch };
-    if (this.timer && patch.pollIntervalMs && patch.pollIntervalMs !== prevInterval) {
-      this.stop();
-      this.start();
+
+    if (!this.config.liveWatch) {
+      this.stopTimer();
+    } else if (!prevLive || this.config.pollIntervalMs !== prevInterval) {
+      this.scheduleNextPoll();
     }
+
     this.emitState();
     return this.getConfig();
   }
@@ -74,8 +89,10 @@ export class DisruptionWatcher extends EventEmitter {
     return {
       startedAt: this.startedAt,
       lastPollAt: this.lastPollAt,
+      nextPollAt: this.nextPollAt,
       pollCount: this.pollCount,
       isScanning: this.isScanning,
+      cost: { ...this.cost },
       config: this.getConfig(),
       terminals: list,
     };
@@ -83,17 +100,42 @@ export class DisruptionWatcher extends EventEmitter {
 
   public start(): void {
     if (this.timer) return;
-    void this.pollOnce(false);
-    this.timer = setInterval(() => {
-      void this.pollOnce(false);
-    }, this.config.pollIntervalMs);
+    void this.pollOnce(false).finally(() => {
+      if (this.config.liveWatch) {
+        this.scheduleNextPoll();
+      }
+    });
+  }
+
+  private scheduleNextPoll(): void {
+    this.stopTimer();
+    if (!this.config.liveWatch) return;
+    const delay = Math.max(5_000, this.config.pollIntervalMs);
+    this.nextPollAt = new Date(Date.now() + delay).toISOString();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.nextPollAt = null;
+      void this.pollOnce(false).finally(() => {
+        if (this.config.liveWatch) {
+          this.scheduleNextPoll();
+        }
+      });
+    }, delay);
+    this.emitState();
+  }
+
+  private stopTimer(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.nextPollAt = null;
   }
 
   public stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.config.liveWatch = false;
+    this.stopTimer();
+    this.emitState();
   }
 
   private mergeSnapshot(
@@ -232,6 +274,13 @@ export class DisruptionWatcher extends EventEmitter {
       term.analysis = result;
       term.lastError = null;
       this.lastAnalyzedHash.set(term.id, latestHash);
+
+      this.cost.totalCalls += 1;
+      this.cost.lastCallCostUsd = result.usage.costUsd;
+      this.cost.totalCostUsd += result.usage.costUsd;
+      this.cost.totalPromptTokens += result.usage.promptTokens;
+      this.cost.totalCachedTokens += result.usage.cachedTokens;
+      this.cost.totalCompletionTokens += result.usage.completionTokens;
 
       term.history.unshift({
         analyzedAt: result.analyzedAt,

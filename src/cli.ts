@@ -41,7 +41,7 @@ function parseArgs(argv: string[]) {
   let all = false;
   let json = false;
   let notify = false;
-  let intervalSec = 15;
+  let intervalSec = 30;
   let model = getDefaultModel();
 
   for (let i = 0; i < argv.length; i++) {
@@ -84,8 +84,9 @@ function renderSnapshot(state: WatcherStateSnapshot, clearScreen: boolean): void
   const timeStr = state.lastPollAt
     ? new Date(state.lastPollAt).toLocaleTimeString()
     : "scanning...";
+  const costStr = `$${state.cost.totalCostUsd.toFixed(4)}`;
   console.log(
-    `${ANSI.bold}${ANSI.cyan}DisruptionWatcher${ANSI.reset}  ${ANSI.dim}model=${state.config.model}  poll=#${state.pollCount}  updated=${timeStr}${state.isScanning ? " (scanning...)" : ""}${ANSI.reset}`
+    `${ANSI.bold}${ANSI.cyan}DisruptionWatcher${ANSI.reset}  ${ANSI.dim}model=${state.config.model}  poll=#${state.pollCount}  every=${Math.round(state.config.pollIntervalMs / 1000)}s  cost=${costStr} (${state.cost.totalCalls} calls)  updated=${timeStr}${state.isScanning ? " (scanning...)" : ""}${ANSI.reset}`
   );
   console.log(`${ANSI.dim}${"─".repeat(86)}${ANSI.reset}`);
 

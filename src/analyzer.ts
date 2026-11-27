@@ -6,10 +6,29 @@ import type {
   LetterGrade,
   MonitoredTerminal,
   Severity,
+  TokenUsage,
   Verdict,
 } from "./types.js";
 
 const DEFAULT_MODEL = "gemini-4-hydrogen";
+
+// Gemini 4 Hydrogen pricing (USD per token)
+const HYDROGEN_PROMPT_RATE = 1.5 / 1_000_000;
+const HYDROGEN_CACHED_RATE = 0.075 / 1_000_000;
+const HYDROGEN_COMPLETION_RATE = 7.5 / 1_000_000;
+
+function computeTokenCost(
+  promptTokens: number,
+  cachedTokens: number,
+  completionTokens: number
+): number {
+  const uncachedPrompt = Math.max(0, promptTokens - cachedTokens);
+  return (
+    uncachedPrompt * HYDROGEN_PROMPT_RATE +
+    cachedTokens * HYDROGEN_CACHED_RATE +
+    completionTokens * HYDROGEN_COMPLETION_RATE
+  );
+}
 
 let envLoaded = false;
 
@@ -246,7 +265,8 @@ interface RawGeminiJson {
 function normalizeParsedResult(
   parsed: RawGeminiJson,
   modelLabel: string,
-  latencyMs: number
+  latencyMs: number,
+  usage: TokenUsage
 ): AnalysisResult {
   const clampedScore = Math.max(
     0,
@@ -289,6 +309,7 @@ function normalizeParsedResult(
     model: modelLabel,
     analyzedAt: new Date().toISOString(),
     latencyMs,
+    usage,
   };
 }
 
@@ -340,6 +361,13 @@ async function callGoogleGemini(
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> };
     }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      cachedContentTokenCount?: number;
+      candidatesTokenCount?: number;
+      thoughtsTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
 
   const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -347,10 +375,26 @@ async function callGoogleGemini(
     throw new Error("Gemini API returned an empty response.");
   }
 
+  const u = data.usageMetadata;
+  const promptTokens = Number(u?.promptTokenCount) || 0;
+  const cachedTokens = Number(u?.cachedContentTokenCount) || 0;
+  const completionTokens =
+    (Number(u?.candidatesTokenCount) || 0) + (Number(u?.thoughtsTokenCount) || 0);
+  const totalTokens =
+    Number(u?.totalTokenCount) || promptTokens + completionTokens;
+  const usage: TokenUsage = {
+    promptTokens,
+    cachedTokens,
+    completionTokens,
+    totalTokens,
+    costUsd: computeTokenCost(promptTokens, cachedTokens, completionTokens),
+  };
+
   return normalizeParsedResult(
     JSON.parse(rawText) as RawGeminiJson,
     bareModel,
-    Date.now() - started
+    Date.now() - started,
+    usage
   );
 }
 
@@ -405,6 +449,13 @@ Respond with ONLY a valid JSON object matching this exact shape:
 
   const data = (await resp.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+      prompt_tokens_details?: { cached_tokens?: number };
+    };
   };
 
   let rawText = data.choices?.[0]?.message?.content?.trim();
@@ -414,10 +465,30 @@ Respond with ONLY a valid JSON object matching this exact shape:
   // Strip markdown code fences if present
   rawText = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
+  const u = data.usage;
+  const promptTokens = Number(u?.prompt_tokens) || 0;
+  const cachedTokens = Number(u?.prompt_tokens_details?.cached_tokens) || 0;
+  const completionTokens = Number(u?.completion_tokens) || 0;
+  const totalTokens = Number(u?.total_tokens) || promptTokens + completionTokens;
+  const reportedCost = typeof u?.cost === "number" && Number.isFinite(u.cost) ? u.cost : null;
+  const costUsd =
+    reportedCost !== null
+      ? reportedCost
+      : computeTokenCost(promptTokens, cachedTokens, completionTokens);
+
+  const usage: TokenUsage = {
+    promptTokens,
+    cachedTokens,
+    completionTokens,
+    totalTokens,
+    costUsd,
+  };
+
   return normalizeParsedResult(
     JSON.parse(rawText) as RawGeminiJson,
     `${orModel} (OpenRouter)`,
-    Date.now() - started
+    Date.now() - started,
+    usage
   );
 }
 

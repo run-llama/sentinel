@@ -12,7 +12,8 @@ const HTML_PATH = resolve(__dirname, "../public/index.html");
 const PORT = Number(process.env.PORT) || 4321;
 
 const watcher = new DisruptionWatcher({
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 15_000,
+  liveWatch: process.env.LIVE_WATCH !== "0",
+  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
   includeAllTerminals: process.env.INCLUDE_ALL === "1",
   notifyOnBadVerdict: process.env.NOTIFY !== "0",
   model: getDefaultModel(),
@@ -93,6 +94,9 @@ const server = createServer(async (req, res) => {
     if (method === "PATCH" && url.pathname === "/api/config") {
       const body = await readJsonBody(req);
       const patch: Partial<WatcherConfig> = {};
+      if (typeof body.liveWatch === "boolean") {
+        patch.liveWatch = body.liveWatch;
+      }
       if (typeof body.includeAllTerminals === "boolean") {
         patch.includeAllTerminals = body.includeAllTerminals;
       }
@@ -100,10 +104,12 @@ const server = createServer(async (req, res) => {
         patch.notifyOnBadVerdict = body.notifyOnBadVerdict;
       }
       if (typeof body.pollIntervalMs === "number" && body.pollIntervalMs >= 5000) {
-        patch.pollIntervalMs = body.pollIntervalMs;
+        patch.pollIntervalMs = Math.round(body.pollIntervalMs);
       }
       const updated = watcher.updateConfig(patch);
-      void watcher.pollOnce(false);
+      if (typeof body.includeAllTerminals === "boolean") {
+        void watcher.pollOnce(false);
+      }
       sendJson(res, 200, updated);
       return;
     }

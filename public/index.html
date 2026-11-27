@@ -289,6 +289,44 @@
       border-radius: 8px;
       font-size: 12px;
     }
+    .interval-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .interval-control input[type="number"] {
+      width: 54px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 6px;
+      font-size: 12.5px;
+      text-align: right;
+    }
+    .interval-control select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 6px;
+      font-size: 12px;
+    }
+    .pulse.paused {
+      background: var(--muted);
+      box-shadow: none;
+    }
+    .stat-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
     .empty {
       text-align: center;
       padding: 48px 20px;
@@ -310,12 +348,30 @@
     </div>
     <div class="controls">
       <label class="toggle">
+        <input id="toggleLive" type="checkbox" checked />
+        Live Watch
+      </label>
+      <div class="interval-control" title="Auto-scan interval in seconds (min 5s)">
+        <span>Every</span>
+        <input id="inputInterval" type="number" min="5" max="3600" step="5" value="30" />
+        <span>s</span>
+        <select id="presetInterval" aria-label="Interval presets">
+          <option value="">Presets</option>
+          <option value="10">10s</option>
+          <option value="15">15s</option>
+          <option value="30">30s</option>
+          <option value="60">60s</option>
+          <option value="120">2m</option>
+          <option value="300">5m</option>
+        </select>
+      </div>
+      <label class="toggle">
         <input id="toggleAll" type="checkbox" />
-        Show non-agent shells
+        All shells
       </label>
       <label class="toggle">
         <input id="toggleNotify" type="checkbox" checked />
-        macOS Alerts
+        Alerts
       </label>
       <button id="btnScan">Scan Now</button>
       <button id="btnForce" class="primary">Re-grade All</button>
@@ -340,6 +396,11 @@
         <div class="stat-label">Critical</div>
         <div id="statCrit" class="stat-val" style="color: var(--critical)">0</div>
       </div>
+      <div class="stat">
+        <div class="stat-label">Hydrogen Cost</div>
+        <div id="statCost" class="stat-val" style="color: var(--accent)">$0.0000</div>
+        <div id="statCostSub" class="stat-sub">0 calls · 0 tokens</div>
+      </div>
     </section>
 
     <section id="grid" class="grid"></section>
@@ -349,10 +410,29 @@
     const gridEl = document.getElementById("grid");
     const pulseEl = document.getElementById("pulse");
     const headerMetaEl = document.getElementById("headerMeta");
+    const toggleLiveEl = document.getElementById("toggleLive");
+    const inputIntervalEl = document.getElementById("inputInterval");
+    const presetIntervalEl = document.getElementById("presetInterval");
     const toggleAllEl = document.getElementById("toggleAll");
     const toggleNotifyEl = document.getElementById("toggleNotify");
     const btnScanEl = document.getElementById("btnScan");
     const btnForceEl = document.getElementById("btnForce");
+
+    let latestState = null;
+
+    function fmtUsd(v) {
+      const n = Number(v) || 0;
+      if (n >= 1) return "$" + n.toFixed(2);
+      if (n >= 0.01) return "$" + n.toFixed(4);
+      return "$" + n.toFixed(4);
+    }
+
+    function fmtTokens(n) {
+      const num = Number(n) || 0;
+      if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + "M";
+      if (num >= 1_000) return (num / 1_000).toFixed(1) + "k";
+      return String(num);
+    }
 
     function esc(str) {
       return String(str ?? "")
@@ -392,8 +472,38 @@
 
     btnScanEl.onclick = () => post("/api/scan");
     btnForceEl.onclick = () => post("/api/scan?force=1");
+    toggleLiveEl.onchange = () => patchConfig({ liveWatch: toggleLiveEl.checked });
+    inputIntervalEl.onchange = () => {
+      const sec = Math.max(5, Math.min(3600, Math.round(Number(inputIntervalEl.value) || 30)));
+      inputIntervalEl.value = String(sec);
+      patchConfig({ pollIntervalMs: sec * 1000 });
+    };
+    presetIntervalEl.onchange = () => {
+      const sec = Number(presetIntervalEl.value);
+      if (sec >= 5) {
+        inputIntervalEl.value = String(sec);
+        patchConfig({ pollIntervalMs: sec * 1000, liveWatch: true });
+      }
+      presetIntervalEl.value = "";
+    };
     toggleAllEl.onchange = () => patchConfig({ includeAllTerminals: toggleAllEl.checked });
     toggleNotifyEl.onchange = () => patchConfig({ notifyOnBadVerdict: toggleNotifyEl.checked });
+
+    function updateHeaderMeta() {
+      if (!latestState) return;
+      const state = latestState;
+      let nextStr = "Paused";
+      if (state.isScanning) {
+        nextStr = "Scanning now...";
+      } else if (state.config.liveWatch && state.nextPollAt) {
+        const rem = Math.max(0, Math.ceil((Date.parse(state.nextPollAt) - Date.now()) / 1000));
+        nextStr = `Next scan in ${rem}s`;
+      } else if (state.config.liveWatch) {
+        nextStr = `Every ${Math.round(state.config.pollIntervalMs / 1000)}s`;
+      }
+      headerMetaEl.textContent = `Model: ${state.config.model} · Poll #${state.pollCount} · ${nextStr} · Updated: ${fmtTime(state.lastPollAt)}`;
+    }
+    setInterval(updateHeaderMeta, 1000);
 
     window.focusTerm = (id) => post(`/api/terminals/${encodeURIComponent(id)}/focus`);
     window.regradeTerm = (id) => post(`/api/terminals/${encodeURIComponent(id)}/analyze`);
@@ -412,10 +522,20 @@
     }
 
     function render(state) {
-      pulseEl.className = "pulse" + (state.isScanning ? " scanning" : "");
-      headerMetaEl.textContent = `Model: ${state.config.model} · Poll #${state.pollCount} · Last updated: ${fmtTime(state.lastPollAt)}`;
+      latestState = state;
+      pulseEl.className = "pulse" + (state.isScanning ? " scanning" : !state.config.liveWatch ? " paused" : "");
+      updateHeaderMeta();
+      toggleLiveEl.checked = Boolean(state.config.liveWatch);
+      if (document.activeElement !== inputIntervalEl) {
+        inputIntervalEl.value = String(Math.round((state.config.pollIntervalMs || 30000) / 1000));
+      }
       toggleAllEl.checked = Boolean(state.config.includeAllTerminals);
       toggleNotifyEl.checked = Boolean(state.config.notifyOnBadVerdict);
+
+      const cost = state.cost || { totalCostUsd: 0, totalCalls: 0, totalPromptTokens: 0, totalCompletionTokens: 0 };
+      document.getElementById("statCost").textContent = fmtUsd(cost.totalCostUsd);
+      document.getElementById("statCostSub").textContent =
+        `${cost.totalCalls} call${cost.totalCalls === 1 ? "" : "s"} · ${fmtTokens(cost.totalPromptTokens)} in / ${fmtTokens(cost.totalCompletionTokens)} out`;
 
       const terms = state.terminals || [];
       const counts = { ok: 0, warn: 0, crit: 0 };
@@ -490,7 +610,7 @@
                 ${verdictBadge}
                 ${a ? diffBadgeHtml(a.diffMatchesClaims) : ""}
               </div>
-              <span class="meta">${a ? `graded ${fmtTime(a.analyzedAt)} (${a.latencyMs}ms)` : ""}</span>
+              <span class="meta">${a ? `graded ${fmtTime(a.analyzedAt)} · ${(a.latencyMs / 1000).toFixed(1)}s${a.usage ? ` · ${fmtUsd(a.usage.costUsd)}` : ""}` : ""}</span>
             </div>
 
             ${a?.taskGoal ? `<div class="goal"><strong>Goal:</strong> ${esc(a.taskGoal)}</div>` : ""}
