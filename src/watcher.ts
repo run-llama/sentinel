@@ -324,6 +324,11 @@ export class DisruptionWatcher extends EventEmitter {
         }
       );
       await Promise.all(workers);
+    } catch (err) {
+      console.error(
+        `[DisruptionWatcher] Poll failed:`,
+        err instanceof Error ? err.message : String(err)
+      );
     } finally {
       this.isScanning = false;
       this.emitState();
